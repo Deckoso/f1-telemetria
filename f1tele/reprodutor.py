@@ -85,7 +85,7 @@ def inventario(caminho: str) -> dict:
             jogo = jogo or rotulo_jogo(cab)
             if cab.id_pacote == 1:
                 info_sessao = ler_sessao(reg.dados) or info_sessao
-            elif cab.id_pacote == 4 and cab.carro_jogador < spec.PARTICIPANTS_CARROS:
+            elif cab.id_pacote == 4:
                 codigo = ler_plataforma(reg.dados, cab.carro_jogador)
                 if codigo not in (None, 255):
                     plataforma = codigo
@@ -98,6 +98,8 @@ def inventario(caminho: str) -> dict:
     duracao = (ultimo - primeiro) / 1e9 if primeiro is not None else 0.0
     n_quadros += len(quadros)
     incompletos += sum(1 for m in quadros.values() if m != completo)
+    formato = formatos.most_common(1)[0][0] if formatos else None
+    tabela = spec.TAMANHOS_POR_FORMATO.get(formato, {})
     return {
         "arquivo": caminho,
         "meta": meta,
@@ -117,7 +119,7 @@ def inventario(caminho: str) -> dict:
                 "pacotes": n,
                 "hz": round(n / duracao, 2) if duracao else None,
                 "tamanhos": dict(tamanhos[pid]),
-                "tamanho_spec_2025": spec.TAMANHOS_2025.get(pid),
+                "tamanho_spec": tabela.get(pid),
             }
             for pid, n in sorted(contagem.items())
         },

@@ -47,9 +47,12 @@ def test_sessao_pista_e_tipo():
     assert ler_sessao(montar_pacote(1, 1, 0, 0, pista=-1))["pista"] == "desconhecida"
 
 
-@pytest.mark.parametrize("registro,offset,tamanho", [(57, 43, 1284), (60, 59, 1350), (58, 57, 1306)])
-def test_plataforma_nos_tres_layouts(registro, offset, tamanho):
-    assert spec.PARTICIPANTS_BASE + 22 * registro == tamanho
+@pytest.mark.parametrize(
+    "carros,registro,offset,tamanho",
+    [(22, 57, 43, 1284), (22, 60, 59, 1350), (22, 58, 57, 1306), (24, 60, 46, 1470)],
+)
+def test_plataforma_nos_quatro_layouts(carros, registro, offset, tamanho):
+    assert spec.PARTICIPANTS_BASE + carros * registro == tamanho
     dados = bytearray(tamanho)
     dados[spec.PARTICIPANTS_BASE + 3 * registro + offset] = 4
     assert ler_plataforma(bytes(dados), 3) == 4
@@ -59,3 +62,12 @@ def test_plataforma_nos_tres_layouts(registro, offset, tamanho):
 def test_plataforma_layout_desconhecido_devolve_none():
     assert ler_plataforma(bytes(30 + 22 * 61), 0) is None
     assert ler_plataforma(bytes(100), 0) is None
+
+
+def test_formato_2026_24_carros():
+    # LapData 2026 = cabeçalho + 24 carros x 57 + 2 (mesmo registro de 2025, array maior)
+    assert spec.TAMANHOS_2026[2] == 29 + 24 * 57 + 2
+    assert spec.TAMANHOS_2025[2] == 29 + 22 * 57 + 2
+    dados = montar_pacote(4, 1, 0, 0, formato=2026, carro_jogador=23, plataforma=1)
+    assert len(dados) == 1470 and ler_plataforma(dados, 23) == 1
+    assert ler_plataforma(dados, 24) is None

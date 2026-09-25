@@ -27,6 +27,7 @@ SINCRONIZAR_BYTES = 2 * 1024 * 1024
 CATALOGO_S = 10.0
 DISCO_MINIMO = 1024**3  # abaixo de 1 GB livre, para de gravar
 DISCO_RETOMA = 1536 * 1024**2
+MAX_FECHADAS = 20  # sessões recentes que podem ser retomadas no mesmo arquivo
 JANELA_QUADROS = 240  # quadros pendentes na checagem de perda (memória limitada)
 
 _BIT_QUADRO = {pid: 1 << i for i, pid in enumerate(spec.PACOTES_POR_QUADRO)}
@@ -47,6 +48,8 @@ def _limpar_nome(texto: str) -> str:
 class Sessao:
     def __init__(self, pasta: str, cab, ip: str, origem: int, porta: int):
         self.uid = cab.sessao_uid
+        self.pasta = pasta
+        self.bytes_brutos = 0
         self.inicio = dt.datetime.now().astimezone()
         self.ip = ip
         self.origem = origem
@@ -87,7 +90,7 @@ class Sessao:
             return f"PC ({nome})"
         if nome:
             return nome
-        return "PC" if self.origem == ORIGEM_LOCAL else "console na rede"
+        return "PC" if self.origem == ORIGEM_LOCAL else "outro aparelho da rede"
 
     @property
     def divergencia(self) -> bool:
@@ -106,17 +109,19 @@ class Sessao:
     # --- gravação ----------------------------------------------------------
     def registrar(self, cab, t_ns: int, dados: bytes) -> None:
         self.escritor.escrever(t_ns, self.origem, dados)
+        self.bytes_brutos += len(dados)
         self.ultimo_pacote = time.monotonic()
         self.bytes_desde_sync += len(dados)
         pid = cab.id_pacote
         self.contagem[pid] += 1
-        if cab.formato == 2025 and spec.TAMANHOS_2025.get(pid) not in (None, len(dados)):
+        esperado = spec.TAMANHOS_POR_FORMATO.get(cab.formato, {}).get(pid)
+        if esperado is not None and esperado != len(dados):
             self.tamanhos_inesperados += 1
         if pid == 1:
             info = ler_sessao(dados)
             if info:
                 self.info_sessao = info
-        elif pid == 4 and cab.carro_jogador < spec.PARTICIPANTS_CARROS:
+        elif pid == 4:
             codigo = ler_plataforma(dados, cab.carro_jogador)
             if codigo is not None and codigo != 255:
                 self.plataforma_codigo = codigo
@@ -146,8 +151,16 @@ class Sessao:
         except OSError:
             return 0
 
+    @property
+    def so_menu(self) -> bool:
+        """Sessão sem nenhuma volta nem pista (telas de menu, lobby, resultado solto)."""
+        return self.quadros_total == 0 and not self.quadros and self.info_sessao is None
+
     def fechar(self) -> str:
-        """Fecha e renomeia para 'AAAA-MM-DD_HHMM_<pista>_<tipo>.f1rec'."""
+        """Fecha e dá o nome final 'AAAA-MM-DD_HHMM_<pista>_<tipo>.f1rec'.
+
+        Sessão só de menu vai para a subpasta 'menus/' (nada é apagado).
+        """
         # Fecha a janela de quadros; os 2 últimos podem ter sido cortados pela
         # própria parada do jogo e não contam como perda.
         pendentes = list(self.quadros.values())
@@ -155,10 +168,16 @@ class Sessao:
         for mascara in pendentes[:-2]:
             self._fechar_quadro(mascara)
         self.escritor.fechar()
-        pista = self.info_sessao["pista"] if self.info_sessao else "pista-desconhecida"
-        tipo = self.info_sessao["tipo"] if self.info_sessao else "sessao"
-        base = f"{self.inicio:%Y-%m-%d_%H%M}_{_limpar_nome(pista)}_{_limpar_nome(tipo)}"
-        pasta = os.path.dirname(self.caminho)
+        pasta = os.path.join(self.pasta, "menus") if self.so_menu else self.pasta
+        if os.path.dirname(self.caminho) == pasta and not self.caminho.endswith(".parcial"):
+            return self.caminho  # retomada que já tinha o nome certo
+        os.makedirs(pasta, exist_ok=True)
+        if self.so_menu:
+            base = f"{self.inicio:%Y-%m-%d_%H%M}_menus"
+        else:
+            pista = self.info_sessao["pista"] if self.info_sessao else "pista-desconhecida"
+            tipo = self.info_sessao["tipo"] if self.info_sessao else "sessao"
+            base = f"{self.inicio:%Y-%m-%d_%H%M}_{_limpar_nome(pista)}_{_limpar_nome(tipo)}"
         destino = os.path.join(pasta, base + ".f1rec")
         n = 2
         while os.path.exists(destino):
@@ -167,6 +186,13 @@ class Sessao:
         os.replace(self.caminho, destino)
         self.caminho = destino
         return destino
+
+    def reabrir(self) -> None:
+        """A mesma sessão do jogo voltou (pausa longa, tela de resultado): continua no mesmo arquivo."""
+        self.escritor = Escritor(self.caminho, None, anexar=True)
+        self.ultimo_pacote = time.monotonic()
+        self.ultimo_sync = time.monotonic()
+        self.bytes_desde_sync = 0
 
     def resumo(self) -> dict:
         return {
@@ -182,7 +208,7 @@ class Sessao:
             "rotulo": self.rotulo,
             "divergencia_plataforma": self.divergencia,
             "pacotes": sum(self.contagem.values()),
-            "bytes_brutos": self.escritor.bytes_brutos,
+            "bytes_brutos": self.bytes_brutos,
             "bytes_disco": self.tamanho_disco(),
             "contagem": {spec.NOMES_PACOTE.get(k, str(k)): v for k, v in sorted(self.contagem.items())},
             "quadros": self.quadros_total,
@@ -236,7 +262,7 @@ class Catalogo:
     def ultimas(self, n: int = 10) -> list[dict]:
         cur = self._con().execute(
             "SELECT inicio, fim, arquivo, pista, tipo, plataforma, pacotes, bytes_disco, estado "
-            "FROM sessoes ORDER BY inicio DESC LIMIT ?",
+            "FROM sessoes WHERE pista IS NOT NULL OR quadros > 0 ORDER BY inicio DESC LIMIT ?",
             (n,),
         )
         campos = [c[0] for c in cur.description]
@@ -259,6 +285,7 @@ class Gravador(threading.Thread):
         self.receptor = receptor
         self.catalogo = Catalogo(os.path.join(pasta, "sessoes.sqlite"))
         self.sessoes: dict[int, Sessao] = {}
+        self.fechadas: collections.OrderedDict[int, Sessao] = collections.OrderedDict()  # para retomar
         self.fonte: str | None = None
         self.fonte_visto = 0.0
         self.outras_fontes = collections.Counter()
@@ -345,6 +372,10 @@ class Gravador(threading.Thread):
             self.descartados_disco += 1
             return
         sessao = self.sessoes.get(cab.sessao_uid)
+        if sessao is None and cab.sessao_uid in self.fechadas:
+            sessao = self.fechadas.pop(cab.sessao_uid)
+            sessao.reabrir()
+            self.sessoes[cab.sessao_uid] = sessao
         if sessao is None:
             origem = ORIGEM_LOCAL if e_local(ip, self.locais) else ORIGEM_REDE
             sessao = Sessao(self.pasta, cab, ip, origem, self.porta)
@@ -398,12 +429,16 @@ class Gravador(threading.Thread):
     def _fechar_sessao(self, s: Sessao) -> None:
         self.sessoes.pop(s.uid, None)
         s.fechar()
+        self.fechadas[s.uid] = s
+        while len(self.fechadas) > MAX_FECHADAS:
+            self.fechadas.popitem(last=False)
         resumo = s.resumo()
         self.catalogo.salvar(resumo, "fechada", self._descartes(), _agora_iso())
-        self.historico.appendleft(
-            {k: resumo[k] for k in ("inicio", "arquivo", "pista", "tipo", "plataforma", "pacotes", "bytes_disco")}
-            | {"estado": "fechada"}
-        )
+        if not s.so_menu:
+            item = {k: resumo[k] for k in ("uid", "inicio", "arquivo", "pista", "tipo", "plataforma", "pacotes", "bytes_disco")}
+            outros = [h for h in self.historico if (h.get("uid"), h.get("inicio")) != (item["uid"], item["inicio"])]
+            self.historico.clear()
+            self.historico.extend([item | {"estado": "fechada"}] + outros[:9])
         self._contagem_anterior = collections.Counter()
 
     # --- estado para o painel ---------------------------------------------

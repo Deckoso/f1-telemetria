@@ -61,14 +61,13 @@ def ler_sessao(dados: bytes) -> dict | None:
 def ler_plataforma(dados: bytes, carro: int) -> int | None:
     """Código m_platform do carro indicado num pacote Participants (id 4).
 
-    O tamanho do registro por carro varia entre formatos (2023/2024/2025);
-    ele é deduzido do tamanho do pacote. Formato desconhecido -> None.
+    O layout (carros no array, tamanho do registro, offset) muda entre formatos
+    (2023/2024/2025/2026) e é escolhido pelo tamanho do pacote. Desconhecido -> None.
     """
-    corpo = len(dados) - spec.PARTICIPANTS_BASE
-    if corpo <= 0 or corpo % spec.PARTICIPANTS_CARROS or carro >= spec.PARTICIPANTS_CARROS:
+    layout = spec.PARTICIPANTS_LAYOUTS.get(len(dados))
+    if layout is None:
         return None
-    registro = corpo // spec.PARTICIPANTS_CARROS
-    offset = spec.PLATAFORMA_OFFSET_POR_REGISTRO.get(registro)
-    if offset is None:
+    carros, registro, offset = layout
+    if carro >= carros:
         return None
     return dados[spec.PARTICIPANTS_BASE + carro * registro + offset]

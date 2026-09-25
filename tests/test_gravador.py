@@ -51,7 +51,7 @@ def test_sem_participants_usa_a_origem(gravacao):
     for q in range(30):
         fila.put((q, XBOX_IP, montar_pacote(6, 9, q / 60, q)))
     assert esperar(lambda: (g.estado().get("sessao") or {}).get("pacotes") == 30)
-    assert g.estado()["sessao"]["plataforma"] == "console na rede"
+    assert g.estado()["sessao"]["plataforma"] == "outro aparelho da rede"
 
 
 def test_divergencia_registrada_sem_bloquear(gravacao):
@@ -132,3 +132,40 @@ def test_sessao_interrompida_recuperada_na_proxima_execucao(tmp_path):
             assert len(list(leitor)) == 1
     finally:
         g.parar(); g.join(5)
+
+
+def test_formato_2026_pc_steam_em_outro_aparelho(gravacao):
+    g, fila, _ = gravacao()
+    n = alimentar(fila, "172.16.0.20", gerar(6, formato=2026, plataforma=1, pista=0, tipo_sessao=1))
+    assert esperar(lambda: (g.estado().get("sessao") or {}).get("pacotes") == n)
+    s = g.estado()["sessao"]
+    assert s["rotulo"] == "F1 25 v1.12 · UDP 2026 (Season Pack) · PC (Steam) · 172.16.0.20"
+    assert s["tamanhos_inesperados"] == 0 and s["contagem"]["Novo2026"] > 0
+
+
+def test_mesma_sessao_depois_de_pausa_continua_no_mesmo_arquivo(gravacao, monkeypatch):
+    monkeypatch.setattr(mod, "SESSAO_OCIOSA_S", 0.3)
+    g, fila, pasta = gravacao()
+    n1 = alimentar(fila, XBOX_IP, gerar(3, sessao_uid=77, tipo_sessao=15))
+    assert esperar(lambda: len(g.estado().get("historico", [])) == 1)  # fechou pela pausa
+    # volta: resultado final da mesma corrida
+    fila.put((10**12, XBOX_IP, montar_pacote(8, 77, 999.0, 99999)))
+    assert esperar(lambda: 77 in g.sessoes)
+    g.parar(); g.join(10)
+    nomes = arquivos(pasta)
+    assert nomes == [nomes[0]] and nomes[0].endswith("_monza_corrida.f1rec")
+    inv = inventario(str(pasta / nomes[0]))
+    assert inv["pacotes"] == n1 + 1 and inv["por_tipo"]["FinalClassification"]["pacotes"] == 1
+    assert not inv["truncado"]
+
+
+def test_sessao_so_de_menu_vai_para_subpasta(gravacao):
+    g, fila, pasta = gravacao()
+    for i in range(5):
+        fila.put((i, XBOX_IP, montar_pacote(3, 0, 0.0, 0)))  # eventos com uid 0 (menus)
+    assert esperar(lambda: (g.estado().get("sessao") or {}).get("pacotes") == 5)
+    g.parar(); g.join(10)
+    assert arquivos(pasta) == []
+    (menu,) = os.listdir(pasta / "menus")
+    assert menu.endswith("_menus.f1rec")
+    assert g.estado()["historico"] == []

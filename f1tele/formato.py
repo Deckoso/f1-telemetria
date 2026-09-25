@@ -35,11 +35,18 @@ class ArquivoInvalido(ValueError):
 
 
 class Escritor:
-    def __init__(self, caminho: str, meta: dict, nivel: int = 6):
+    """Cria um .f1rec, ou (anexar=True) continua um .f1rec já fechado.
+
+    Continuar = novo membro gzip no fim do arquivo, só com registros. O gzip lê
+    membros concatenados como um stream único, então o Leitor não muda.
+    """
+
+    def __init__(self, caminho: str, meta: dict | None, nivel: int = 6, anexar: bool = False):
         self.caminho = caminho
-        self._arq = gzip.open(caminho, "wb", compresslevel=nivel)
-        bruto = json.dumps(meta, ensure_ascii=False).encode("utf-8")
-        self._arq.write(MAGICA + _PREFIXO.pack(VERSAO_FORMATO, len(bruto)) + bruto)
+        self._arq = gzip.open(caminho, "ab" if anexar else "wb", compresslevel=nivel)
+        if not anexar:
+            bruto = json.dumps(meta or {}, ensure_ascii=False).encode("utf-8")
+            self._arq.write(MAGICA + _PREFIXO.pack(VERSAO_FORMATO, len(bruto)) + bruto)
         self.bytes_brutos = 0
         self.registros = 0
 

@@ -32,6 +32,7 @@ NOMES_PACOTE = {
     13: "MotionEx",
     14: "TimeTrial",
     15: "LapPositions",
+    16: "Novo2026",  # só no formato 2026; 269 bytes, 1 por quadro (spec 2026 não obtida)
 }
 
 # Tamanho de cada pacote no formato 2025 (spec v3).
@@ -54,6 +55,29 @@ TAMANHOS_2025 = {
     15: 1131,
 }
 
+# Tamanhos observados no formato 2026 (F1 25 v1.26 + 2026 Season Pack, gravação
+# real de 2026-09-25). Arrays passaram de 22 para 24 carros.
+TAMANHOS_2026 = {
+    0: 1325,
+    1: 926,
+    2: 1399,
+    3: 45,
+    4: 1470,
+    5: 1233,
+    6: 1448,
+    7: 1445,
+    8: 1134,
+    10: 1133,
+    11: 1460,
+    12: 231,
+    13: 273,
+    14: 104,
+    15: 1231,
+    16: 269,
+}
+
+TAMANHOS_POR_FORMATO = {2025: TAMANHOS_2025, 2026: TAMANHOS_2026}
+
 # Pacotes enviados a cada quadro na taxa escolhida no menu. LapData, CarTelemetry
 # e CarStatus saem sempre juntos com o mesmo frameIdentifier: se um quadro chega
 # sem os três, houve perda no caminho.
@@ -64,14 +88,15 @@ SESSION_TIPO = 29 + 6  # uint8 m_sessionType
 SESSION_PISTA = 29 + 7  # int8 m_trackId
 SESSION_FORMULA = 29 + 8  # uint8 m_formula
 
-# Participants: 29 cabeçalho + 1 m_numActiveCars + 22 carros.
-# Tamanho do registro de cada carro -> offset de m_platform dentro dele.
+# Participants: 29 cabeçalho + 1 m_numActiveCars + N carros.
+# Tamanho do pacote -> (carros no array, bytes por carro, offset de m_platform no registro).
 PARTICIPANTS_BASE = 30
-PARTICIPANTS_CARROS = 22
-PLATAFORMA_OFFSET_POR_REGISTRO = {
-    57: 43,  # 2025 (nome 32 chars + techLevel)
-    60: 59,  # 2024 (nome 48 chars + techLevel)
-    58: 57,  # 2023 (nome 48 chars, sem techLevel)
+PARTICIPANTS_LAYOUTS = {
+    1284: (22, 57, 43),  # 2025 (nome 32 chars + techLevel)
+    1350: (22, 60, 59),  # 2024 (nome 48 chars + techLevel)
+    1306: (22, 58, 57),  # 2023 (nome 48 chars, sem techLevel)
+    1470: (24, 60, 46),  # 2026 Season Pack: 24 carros, 3 bytes novos antes de m_platform
+    #                      (confirmado em gravação real do F1 25 v1.26, 2026-09-25)
 }
 
 PLATAFORMAS = {

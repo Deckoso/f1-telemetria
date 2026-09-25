@@ -1,4 +1,4 @@
-"""Gerador de pacotes sintéticos no formato 2025.
+"""Gerador de pacotes sintéticos nos formatos 2025 e 2026.
 
 Cabeçalho e tamanhos seguem a spec; o corpo é plausível só onde o gravador
 lê algo (Session: pista/tipo; Participants: plataforma). Serve para testar
@@ -20,6 +20,7 @@ FREQUENCIAS = {
     0: None, 2: None, 6: None, 7: None, 13: None,
     1: 2, 5: 2, 10: 10, 11: 20, 12: 20, 14: 1, 15: 1,
     4: 0.2,  # a cada 5 s
+    16: None,  # só no formato 2026
 }
 
 
@@ -37,7 +38,7 @@ def montar_pacote(
     tamanho: int | None = None,
     corpo_rng: random.Random | None = None,
 ) -> bytes:
-    tamanho = tamanho or spec.TAMANHOS_2025[pid]
+    tamanho = tamanho or spec.TAMANHOS_POR_FORMATO.get(formato, spec.TAMANHOS_2025)[pid]
     cab = spec.HEADER.pack(formato, 25, 1, 12, 1, pid, sessao_uid, tempo, quadro, quadro, carro_jogador, 255)
     corpo = bytearray(tamanho - spec.HEADER_SIZE)
     if corpo_rng is not None and pid not in (1, 4):
@@ -54,9 +55,8 @@ def montar_pacote(
         pacote[spec.SESSION_PISTA] = pista & 0xFF
     elif pid == 4:
         pacote[spec.HEADER_SIZE] = 20  # m_numActiveCars
-        registro = (tamanho - spec.PARTICIPANTS_BASE) // spec.PARTICIPANTS_CARROS
-        offset = spec.PLATAFORMA_OFFSET_POR_REGISTRO[registro]
-        for carro in range(20):
+        carros, registro, offset = spec.PARTICIPANTS_LAYOUTS[tamanho]
+        for carro in range(carros):
             pacote[spec.PARTICIPANTS_BASE + carro * registro + offset] = plataforma if carro == carro_jogador else 255
     return bytes(pacote)
 
@@ -78,12 +78,15 @@ def gerar(
     perder_a_cada=N remove o CarStatus de 1 a cada N quadros (simula perda).
     """
     rng = random.Random(semente)
+    tabela = spec.TAMANHOS_POR_FORMATO.get(formato, spec.TAMANHOS_2025)
     passo = 1.0 / hz
     proximo = {pid: 0.0 for pid in FREQUENCIAS}
     quadro = 0
     t = 0.0
     while t < duracao_s:
         for pid, freq in FREQUENCIAS.items():
+            if pid not in tabela:
+                continue
             intervalo = passo if freq is None else 1.0 / freq
             if t + 1e-9 >= proximo[pid]:
                 proximo[pid] += intervalo

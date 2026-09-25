@@ -28,7 +28,7 @@ Sem argumentos (duplo clique no `.exe`) = `gravar`.
 ## Formato `.f1rec`
 Stream gzip: `F1REC\0` · u16 versão · u32 tamanho · JSON de metadados · registros `u32 tamanho | u64 t_recv_ns | u8 origem | bytes`. Flush de sincronização a cada 1 s ou 2 MB: arquivo cortado é legível até o último flush. Catálogo em `sessoes.sqlite` na mesma pasta.
 
-Nome: `AAAA-MM-DD_HHMM_<pista>_<sessao>.f1rec`. Durante a gravação, `...<uid>.f1rec.parcial`; se o programa cair, vira `_interrompida.f1rec` na próxima execução.
+Nome: `AAAA-MM-DD_HHMM_<pista>_<sessao>.f1rec`. Durante a gravação, `...<uid>.f1rec.parcial`; se o programa cair, vira `_interrompida.f1rec` na próxima execução. Se a mesma sessão do jogo voltar depois de uma pausa (ou a tela de resultado chegar depois), ela continua no mesmo arquivo. Sessões só de menu, sem volta nem pista, vão para `menus/`.
 
 ## Estrutura
 | Arquivo | Papel |

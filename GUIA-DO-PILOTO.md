@@ -21,7 +21,7 @@ No F1 25: **Configurações → Configurações de telemetria**
 | Modo Broadcast UDP | Desligado | Desligado |
 | Endereço IP UDP | **o IP que o painel mostra** | `127.0.0.1` |
 | Porta UDP | 20777 | 20777 |
-| Taxa de envio UDP | **60 Hz** | **60 Hz** |
+| Taxa de envio UDP | **60 Hz** (o padrão do jogo é 20: mude!) | **60 Hz** |
 | Formato UDP | deixe o padrão | deixe o padrão |
 
 Se o Xbox não conectar mesmo com o IP certo, ligue o **Modo Broadcast**: ele manda para todos os aparelhos da rede.
@@ -29,7 +29,7 @@ Se o Xbox não conectar mesmo com o IP certo, ligue o **Modo Broadcast**: ele ma
 ## 3. Usar no dia a dia
 1. Abra o `F1Telemetria.exe` **antes** de ir para a pista.
 2. Jogue normalmente. O painel muda para **Gravando** e mostra, por exemplo, `F1 25 · Xbox · 192.168.0.23`, a pista e a sessão.
-3. Cada sessão (treino, classificação, corrida, time trial) vira um arquivo em `Documentos\F1 Telemetria\gravacoes`, com data, pista e tipo no nome. O botão **Abrir pasta** leva direto até ela.
+3. Cada sessão (treino, classificação, corrida, time trial) vira **um** arquivo, mesmo com pausas no meio, em `Documentos\F1 Telemetria\gravacoes`, com data, pista e tipo no nome. O botão **Abrir pasta** leva direto até ela. Telas de menu sem volta nenhuma ficam separadas na subpasta `menus`.
 4. Para fechar: `Ctrl+C` na janela preta, ou feche a janela. Se o PC desligar no meio, a sessão fica salva até cerca de 1 segundo antes (aparece como `_interrompida`).
 
 ## 4. Usar junto com o F1 Laps
