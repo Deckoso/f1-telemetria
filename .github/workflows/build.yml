@@ -38,6 +38,9 @@ jobs:
         run: |
           .\dist\F1Telemetria.exe --versao
           .\dist\F1Telemetria.exe sintetico --minutos 0.05 --velocidade 0 --porta 9
+          python -c "import sys; sys.path.insert(0, '.'); from tests import pista_sintetica as ps; ps.gravar('smoke.f1rec', [{}, {}, {1: 25}])"
+          .\dist\F1Telemetria.exe analisar smoke.f1rec --saida smoke --sem-navegador
+          if (-not (Select-String -Path smoke\smoke.html -Pattern "Onde você perde tempo" -Quiet)) { throw "análise do .exe falhou" }
       - name: montar o pacote
         shell: pwsh
         run: |
