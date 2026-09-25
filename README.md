@@ -1,6 +1,6 @@
-# f1tele: gravador de telemetria do F1 25
+# f1tele: gravador e análise de telemetria do F1 25
 
-Grava a telemetria UDP do **F1 25** com o jogo no **Xbox, PlayStation ou PC**, sessão por sessão, sem perder pacote. Base das próximas ondas (análise pós-corrida, gerador de setup, tempo real).
+Grava a telemetria UDP do **F1 25** com o jogo no **Xbox, PlayStation ou PC** (vários pilotos ao mesmo tempo), sessão por sessão, sem perder pacote, e mostra **onde você perde tempo**: cada volta comparada com a sua melhor, curva a curva (frenagem, ápice, retomada), com gráficos, mapa da pista e pneus. Formatos UDP 2025 e 2026 (Season Pack).
 
 - Guia para o piloto: [`GUIA-DO-PILOTO.md`](GUIA-DO-PILOTO.md)
 
@@ -21,6 +21,7 @@ O executável não tem assinatura digital: na primeira vez o Windows mostra "O W
 python -m f1tele gravar [--porta 20777] [--pasta DIR] [--repassar 127.0.0.1:20778] [--sem-navegador]
 python -m f1tele reproduzir ARQ.f1rec [--velocidade 1|2|10|0] [--desde MIN] [--loop] [--porta 20777]
 python -m f1tele inventario ARQ.f1rec          # contagem por tipo, Hz, perdas, formato, plataforma
+python -m f1tele analisar ARQ.f1rec            # análise pós-sessão (HTML autocontido em analises/)
 python -m f1tele sintetico --minutos 1         # pacotes falsos (formato 2025) para testar o encanamento
 ```
 Sem argumentos (duplo clique no `.exe`) = `gravar`.
@@ -40,7 +41,10 @@ Nome: `AAAA-MM-DD_HHMM_<pista>_<sessao>.f1rec`. Durante a gravação, `...<uid>.
 | `f1tele/formato.py` | escrita/leitura `.f1rec` |
 | `f1tele/reprodutor.py` | reproduzir + inventário |
 | `f1tele/sintetico.py` | gerador de pacotes (só encanamento) |
-| `f1tele/painel.py` | painel `127.0.0.1:8750` |
+| `f1tele/decodificador.py` | campos por formato (2025 spec / 2026 validado) |
+| `f1tele/analise.py` | voltas por distância, curvas, perdas, conselhos |
+| `f1tele/relatorio.py` | HTML autocontido (SVG próprio) |
+| `f1tele/painel.py` | painel `127.0.0.1:8750` + `/analise` |
 
 ## Desenvolvimento
 ```bash

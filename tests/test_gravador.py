@@ -35,7 +35,7 @@ def test_xbox_na_rede_detectado_e_nomeado(gravacao):
     assert not s["divergencia_plataforma"] and s["tamanhos_inesperados"] == 0
     g.parar(); g.join(10)
     (nome,) = arquivos(pasta)
-    assert nome.endswith("_monza_time-trial.f1rec")
+    assert nome.endswith("_monza_time-trial_xbox.f1rec")
     assert inventario(str(pasta / nome))["pacotes"] == n
 
 
@@ -60,13 +60,41 @@ def test_divergencia_registrada_sem_bloquear(gravacao):
     assert esperar(lambda: (g.estado().get("sessao") or {}).get("divergencia_plataforma") is True)
 
 
-def test_segunda_fonte_ignorada(gravacao):
+def test_dois_pilotos_ao_mesmo_tempo_xbox_e_steam_local(gravacao):
+    """CP-0 da Onda 2: Xbox pela rede + F1 25 da Steam no próprio PC, intercalados."""
     g, fila, pasta = gravacao()
-    alimentar(fila, XBOX_IP, gerar(2))
-    alimentar(fila, "192.168.0.77", gerar(1, sessao_uid=99))
-    assert esperar(lambda: g.estado().get("outras_fontes", {}).get("192.168.0.77", 0) > 0)
+    xbox = gerar(8, sessao_uid=0xAAAA, pista=11, tipo_sessao=15, plataforma=4, formato=2026)
+    steam = gerar(8, sessao_uid=0xBBBB, pista=7, tipo_sessao=18, plataforma=1, formato=2026)
+    n = 0
+    for (t1, d1), (t2, d2) in zip(xbox, steam):
+        fila.put((int(t1 * 1e9), XBOX_IP, d1))
+        fila.put((int(t2 * 1e9), "127.0.0.1", d2))
+        n += 1
+    assert esperar(lambda: len(g.estado().get("sessoes_ativas", [])) == 2)
+    rotulos = sorted(c["rotulo"] for c in g.estado()["sessoes_ativas"])
+    assert rotulos == [
+        f"F1 25 v1.12 · UDP 2026 (Season Pack) · PC (Steam) · este computador",
+        f"F1 25 v1.12 · UDP 2026 (Season Pack) · Xbox · {XBOX_IP}",
+    ]
     g.parar(); g.join(10)
-    assert len(arquivos(pasta)) == 1
+    nomes = arquivos(pasta)
+    assert len(nomes) == 2
+    (xb,) = [x for x in nomes if x.endswith("_monza_corrida_xbox.f1rec")]
+    (pc,) = [x for x in nomes if x.endswith("_silverstone_time-trial_pc-steam.f1rec")]
+    with Leitor(str(pasta / xb)) as a, Leitor(str(pasta / pc)) as b:
+        ra, rb = list(a), list(b)
+    assert len(ra) == len(rb) == n
+    assert all(r.origem == 1 for r in ra) and all(r.origem == 0 for r in rb)  # nada misturado
+
+
+def test_limite_de_fontes_simultaneas(gravacao, monkeypatch):
+    monkeypatch.setattr(mod, "MAX_FONTES", 2)
+    g, fila, pasta = gravacao()
+    for i, ip in enumerate(["192.168.0.1", "192.168.0.2", "192.168.0.3"]):
+        alimentar(fila, ip, gerar(1, sessao_uid=100 + i))
+    assert esperar(lambda: g.estado().get("outras_fontes", {}).get("192.168.0.3", 0) > 0)
+    g.parar(); g.join(10)
+    assert len(arquivos(pasta)) == 2
 
 
 def test_lixo_e_formato_desconhecido(gravacao):
@@ -150,10 +178,10 @@ def test_mesma_sessao_depois_de_pausa_continua_no_mesmo_arquivo(gravacao, monkey
     assert esperar(lambda: len(g.estado().get("historico", [])) == 1)  # fechou pela pausa
     # volta: resultado final da mesma corrida
     fila.put((10**12, XBOX_IP, montar_pacote(8, 77, 999.0, 99999)))
-    assert esperar(lambda: 77 in g.sessoes)
+    assert esperar(lambda: (XBOX_IP, 77) in g.sessoes)
     g.parar(); g.join(10)
     nomes = arquivos(pasta)
-    assert nomes == [nomes[0]] and nomes[0].endswith("_monza_corrida.f1rec")
+    assert nomes == [nomes[0]] and nomes[0].endswith("_monza_corrida_xbox.f1rec")
     inv = inventario(str(pasta / nomes[0]))
     assert inv["pacotes"] == n1 + 1 and inv["por_tipo"]["FinalClassification"]["pacotes"] == 1
     assert not inv["truncado"]

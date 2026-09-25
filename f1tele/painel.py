@@ -1,11 +1,25 @@
 """Painel de status em http://127.0.0.1:8750 (só este computador enxerga)."""
 
+import html
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+NOME_GRAVACAO = re.compile(r"^[A-Za-z0-9_.\-]{1,160}\.f1rec(\.parcial)?$")
+_UMA_ANALISE_POR_VEZ = threading.Lock()  # análise pesa em CPU/memória: nunca duas juntas
+
+
+def pagina_erro(msg: str) -> bytes:
+    return (
+        '<!doctype html><meta charset="utf-8"><title>Análise</title>'
+        '<body style="font:16px system-ui;max-width:640px;margin:40px auto;padding:0 16px">'
+        f"<h2>Não deu para gerar a análise</h2><p>{html.escape(msg)}</p></body>"
+    ).encode("utf-8")
 
 PAGINA = """<!doctype html>
 <html lang="pt-BR">
@@ -38,6 +52,10 @@ ol { margin:6px 0 0; padding-left:20px; } li { margin:4px 0; }
 code { font-size:16px; font-weight:700; }
 button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--linha); background:var(--cartao); color:var(--texto); cursor:pointer; }
 .escondido { display:none; }
+.sub { color:var(--suave); font-size:13px; margin-top:6px; }
+a.botao { display:inline-block; padding:7px 12px; border-radius:8px; border:1px solid var(--linha); color:var(--texto); text-decoration:none; font-weight:600; }
+a.botao:hover { border-color:var(--ok); }
+.piloto h3 { margin:0; font-size:17px; } .piloto .topo { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }
 .rolagem { overflow-x:auto; }
 </style>
 </head>
@@ -47,15 +65,9 @@ button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var
   <section class="cartao">
     <div id="estado" class="aguardando">Aguardando o jogo…</div>
     <div id="rotulo">Nenhum sinal ainda.</div>
-    <div class="grade">
-      <div class="num"><b id="pista">–</b><span>pista</span></div>
-      <div class="num"><b id="tipo">–</b><span>sessão</span></div>
-      <div class="num"><b id="tempo">0:00</b><span>tempo gravado</span></div>
-      <div class="num"><b id="tamanho">0 MB</b><span>arquivo</span></div>
-      <div class="num"><b id="perdas">0</b><span>quadros com perda</span></div>
-      <div class="num"><b id="descartes">0</b><span>descartados</span></div>
-    </div>
+    <div class="sub">Descartados: <b id="descartes">0</b></div>
   </section>
+  <div id="pilotos"></div>
 
   <section id="config" class="cartao">
     <b>Para ligar no jogo</b> (Configurações → Telemetria):
@@ -105,11 +117,14 @@ async function atualizar() {
   const g = e.gravador, r = e.receptor, s = g.sessao;
   $("estado").textContent = g.erro ? "Erro ao gravar" : NOMES[g.estado] || g.estado;
   $("estado").className = g.erro ? "erro" : g.estado;
-  $("rotulo").textContent = s ? s.rotulo : "Nenhum sinal ainda.";
-  $("pista").textContent = s?.pista ?? "–"; $("tipo").textContent = s?.tipo ?? "–";
-  $("tempo").textContent = relogio(g.tempo_gravado_s || 0);
-  $("tamanho").textContent = mb(s?.bytes_disco || 0);
-  $("perdas").textContent = s?.quadros_incompletos ?? 0;
+  const ativas = g.sessoes_ativas || [];
+  $("rotulo").textContent = ativas.length > 1 ? `${ativas.length} pilotos gravando ao mesmo tempo` : (s ? s.rotulo : "Nenhum sinal ainda.");
+  $("pilotos").innerHTML = ativas.map((a) => `<section class="cartao piloto"><div class="topo"><div><h3>${esc(a.plataforma)} · ${esc(a.pista)} · ${esc(a.tipo)}</h3>
+    <div class="sub">${esc(a.rotulo)}</div></div>
+    <a class="botao" href="/analise?arquivo=${encodeURIComponent(a.arquivo)}" target="_blank">Análise até agora</a></div>
+    <div class="grade"><div class="num"><b>${relogio(a.tempo_gravado_s || 0)}</b><span>tempo gravado</span></div>
+    <div class="num"><b>${mb(a.bytes_disco || 0)}</b><span>arquivo</span></div>
+    <div class="num"><b>${a.quadros_incompletos ?? 0}</b><span>quadros com perda</span></div></div></section>`).join("");
   $("descartes").textContent = r.descartes_fila + g.descartados_disco;
   $("porta").textContent = r.porta;
   document.querySelectorAll("#ip, .ip2").forEach((n) => n.textContent = e.ip_rede || "(sem rede)");
@@ -120,8 +135,8 @@ async function atualizar() {
   const alertas = [];
   if (g.erro) alertas.push(`Erro: ${esc(g.erro)}`);
   if (e.perfil_rede === "Public") alertas.push("A rede deste PC está como <b>Pública</b> no Windows: o firewall pode bloquear o console. Mude para <b>Privada</b> (Configurações → Rede e Internet).");
-  for (const [ip, n] of Object.entries(g.outras_fontes || {})) alertas.push(`Outro aparelho (${esc(ip)}) também está mandando telemetria: ${n} pacotes ignorados. Só a primeira fonte é gravada.`);
-  if (s?.tamanhos_inesperados) alertas.push(`${s.tamanhos_inesperados} pacotes com tamanho diferente da spec 2025 (gravados normalmente; versão do jogo/UDP pode ter mudado).`);
+  for (const [ip, n] of Object.entries(g.outras_fontes || {})) alertas.push(`Aparelho ${esc(ip)} ignorado (${n} pacotes): já há 4 fontes gravando ao mesmo tempo.`);
+  if (s?.tamanhos_inesperados) alertas.push(`${s.tamanhos_inesperados} pacotes com tamanho diferente do esperado (gravados normalmente; versão do jogo/UDP pode ter mudado).`);
   if (s && ![2023,2024,2025,2026].includes(s.formato_udp)) alertas.push(`Formato UDP ${s.formato_udp} desconhecido: gravando mesmo assim.`);
   if (g.invalidos) alertas.push(`${g.invalidos} pacotes que não são do F1 foram ignorados.`);
   $("alertas").innerHTML = alertas.map((a) => `<div>${a}</div>`).join("");
@@ -130,8 +145,9 @@ async function atualizar() {
   $("taxas").innerHTML = taxas.length ? "<tr><th>Pacote</th><th>por segundo</th></tr>" +
     taxas.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("") : "<tr><td>—</td></tr>";
   const h = g.historico || [];
-  $("historico").innerHTML = h.length ? "<tr><th>Início</th><th>Pista</th><th>Sessão</th><th>Plataforma</th><th>Tamanho</th></tr>" +
-    h.map((x) => `<tr><td>${esc((x.inicio||"").replace("T"," ").slice(0,16))}</td><td>${esc(x.pista)}</td><td>${esc(x.tipo)}</td><td>${esc(x.plataforma)}</td><td>${mb(x.bytes_disco||0)}</td></tr>`).join("")
+  $("historico").innerHTML = h.length ? "<tr><th>Início</th><th>Pista</th><th>Sessão</th><th>Plataforma</th><th>Tamanho</th><th></th></tr>" +
+    h.map((x) => `<tr><td>${esc((x.inicio||"").replace("T"," ").slice(0,16))}</td><td>${esc(x.pista)}</td><td>${esc(x.tipo)}</td><td>${esc(x.plataforma)}</td><td>${mb(x.bytes_disco||0)}</td>
+    <td>${x.arquivo && x.arquivo.endsWith(".f1rec") ? `<a class="botao" href="/analise?arquivo=${encodeURIComponent(x.arquivo)}" target="_blank">Análise</a>` : ""}</td></tr>`).join("")
     : "<tr><td>Nenhuma sessão gravada ainda.</td></tr>";
 }
 $("abrir").onclick = () => fetch("/abrir-pasta", { method: "POST", headers: { "X-F1Tele": "1" } });
@@ -181,10 +197,35 @@ class Painel:
                     return self._responder(403, b"host", "text/plain")
                 if self.path == "/":
                     return self._responder(200, PAGINA.encode("utf-8"), "text/html; charset=utf-8")
+                url = urlsplit(self.path)
+                if url.path == "/analise":
+                    return self._analise(parse_qs(url.query).get("arquivo", [""])[0])
                 if self.path == "/estado":
                     corpo = json.dumps(painel.obter_estado(), ensure_ascii=False, default=str).encode("utf-8")
                     return self._responder(200, corpo, "application/json; charset=utf-8")
                 self._responder(404, b"nao encontrado", "text/plain")
+
+            def _analise(self, nome: str):
+                # só nome simples de gravação, só dentro da pasta de gravações
+                if not NOME_GRAVACAO.match(nome):
+                    return self._responder(400, pagina_erro("Nome de gravação inválido."), "text/html; charset=utf-8")
+                caminho = os.path.join(painel.pasta, nome)
+                if not os.path.isfile(caminho):
+                    return self._responder(404, pagina_erro("Gravação não encontrada (talvez já tenha sido renomeada: atualize o painel)."), "text/html; charset=utf-8")
+                from .analise import SemDados
+                from .decodificador import FormatoNaoSuportado
+                from .relatorio import gerar_arquivo
+
+                try:
+                    with _UMA_ANALISE_POR_VEZ:
+                        destino = gerar_arquivo(caminho, os.path.join(painel.pasta, "analises"))
+                    with open(destino, "rb") as f:
+                        corpo = f.read()
+                except (SemDados, FormatoNaoSuportado) as exc:
+                    return self._responder(200, pagina_erro(str(exc)), "text/html; charset=utf-8")
+                except Exception as exc:  # gravação cortada ao meio etc.
+                    return self._responder(500, pagina_erro(f"{type(exc).__name__}: {exc}"), "text/html; charset=utf-8")
+                return self._responder(200, corpo, "text/html; charset=utf-8")
 
             def do_POST(self):
                 # Cabeçalho próprio: um site qualquer não consegue mandá-lo sem permissão (CORS).

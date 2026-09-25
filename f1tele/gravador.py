@@ -21,7 +21,8 @@ from .formato import ORIGEM_LOCAL, ORIGEM_REDE, Escritor
 from .rede import e_local
 
 SESSAO_OCIOSA_S = 60.0  # sem pacote por esse tempo -> sessão fechada
-FONTE_OCIOSA_S = 10.0  # outra fonte só assume depois disso
+MAX_FONTES = 4  # pilotos gravando ao mesmo tempo (ex.: Xbox + PC); o excesso é contado e ignorado
+FONTE_OCIOSA_S = 120.0  # fonte sem sinal por esse tempo libera a vaga
 SINCRONIZAR_S = 1.0
 SINCRONIZAR_BYTES = 2 * 1024 * 1024
 CATALOGO_S = 10.0
@@ -48,6 +49,7 @@ def _limpar_nome(texto: str) -> str:
 class Sessao:
     def __init__(self, pasta: str, cab, ip: str, origem: int, porta: int):
         self.uid = cab.sessao_uid
+        self.chave = (ip, cab.sessao_uid)
         self.pasta = pasta
         self.bytes_brutos = 0
         self.inicio = dt.datetime.now().astimezone()
@@ -91,6 +93,16 @@ class Sessao:
         if nome:
             return nome
         return "PC" if self.origem == ORIGEM_LOCAL else "outro aparelho da rede"
+
+    @property
+    def plataforma_arquivo(self) -> str:
+        """Sufixo do nome do arquivo: xbox, playstation, pc-steam, pc-ea, pc, rede."""
+        nome = spec.PLATAFORMAS.get(self.plataforma_codigo) if self.plataforma_codigo is not None else None
+        if nome in ("Steam", "EA"):
+            return f"pc-{nome.lower()}"
+        if nome:
+            return nome.lower()
+        return "pc" if self.origem == ORIGEM_LOCAL else "rede"
 
     @property
     def divergencia(self) -> bool:
@@ -168,6 +180,12 @@ class Sessao:
         for mascara in pendentes[:-2]:
             self._fechar_quadro(mascara)
         self.escritor.fechar()
+        if self.caminho.endswith(".parcial"):  # a análise "até agora" perde o sentido com o nome final
+            provisoria = os.path.join(self.pasta, "analises", os.path.basename(self.caminho)[: -len(".f1rec.parcial")] + ".html")
+            try:
+                os.remove(provisoria)
+            except OSError:
+                pass
         pasta = os.path.join(self.pasta, "menus") if self.so_menu else self.pasta
         if os.path.dirname(self.caminho) == pasta and not self.caminho.endswith(".parcial"):
             return self.caminho  # retomada que já tinha o nome certo
@@ -177,7 +195,7 @@ class Sessao:
         else:
             pista = self.info_sessao["pista"] if self.info_sessao else "pista-desconhecida"
             tipo = self.info_sessao["tipo"] if self.info_sessao else "sessao"
-            base = f"{self.inicio:%Y-%m-%d_%H%M}_{_limpar_nome(pista)}_{_limpar_nome(tipo)}"
+            base = f"{self.inicio:%Y-%m-%d_%H%M}_{_limpar_nome(pista)}_{_limpar_nome(tipo)}_{self.plataforma_arquivo}"
         destino = os.path.join(pasta, base + ".f1rec")
         n = 2
         while os.path.exists(destino):
@@ -284,11 +302,10 @@ class Gravador(threading.Thread):
         self.porta = porta
         self.receptor = receptor
         self.catalogo = Catalogo(os.path.join(pasta, "sessoes.sqlite"))
-        self.sessoes: dict[int, Sessao] = {}
-        self.fechadas: collections.OrderedDict[int, Sessao] = collections.OrderedDict()  # para retomar
-        self.fonte: str | None = None
-        self.fonte_visto = 0.0
-        self.outras_fontes = collections.Counter()
+        self.sessoes: dict[tuple, Sessao] = {}  # (ip, uid) -> sessão aberta
+        self.fechadas: collections.OrderedDict[tuple, Sessao] = collections.OrderedDict()  # para retomar
+        self.fontes: dict[str, float] = {}  # ip -> último pacote (monotonic)
+        self.outras_fontes = collections.Counter()  # fontes além de MAX_FONTES, ignoradas
         self.invalidos = 0
         self.pausado_disco = False
         self.descartados_disco = 0
@@ -361,25 +378,27 @@ class Gravador(threading.Thread):
             self.invalidos += 1
             return
         agora = time.monotonic()
-        if self.fonte != ip:
-            if self.fonte is None or agora - self.fonte_visto > FONTE_OCIOSA_S:
-                self.fonte = ip
-            else:
+        if ip not in self.fontes:
+            for velho, visto in list(self.fontes.items()):
+                if agora - visto > FONTE_OCIOSA_S:
+                    del self.fontes[velho]
+            if len(self.fontes) >= MAX_FONTES:
                 self.outras_fontes[ip] += 1
                 return
-        self.fonte_visto = agora
+        self.fontes[ip] = agora
         if self.pausado_disco:
             self.descartados_disco += 1
             return
-        sessao = self.sessoes.get(cab.sessao_uid)
-        if sessao is None and cab.sessao_uid in self.fechadas:
-            sessao = self.fechadas.pop(cab.sessao_uid)
+        chave = (ip, cab.sessao_uid)
+        sessao = self.sessoes.get(chave)
+        if sessao is None and chave in self.fechadas:
+            sessao = self.fechadas.pop(chave)
             sessao.reabrir()
-            self.sessoes[cab.sessao_uid] = sessao
+            self.sessoes[chave] = sessao
         if sessao is None:
             origem = ORIGEM_LOCAL if e_local(ip, self.locais) else ORIGEM_REDE
             sessao = Sessao(self.pasta, cab, ip, origem, self.porta)
-            self.sessoes[cab.sessao_uid] = sessao
+            self.sessoes[chave] = sessao
             self.catalogo.salvar(sessao.resumo(), "gravando", self._descartes())
         sessao.registrar(cab, t_ns, dados)
         sessao.talvez_sincronizar()
@@ -427,36 +446,48 @@ class Gravador(threading.Thread):
         self._ultima_taxa = agora
 
     def _fechar_sessao(self, s: Sessao) -> None:
-        self.sessoes.pop(s.uid, None)
+        self.sessoes.pop(s.chave, None)
         s.fechar()
-        self.fechadas[s.uid] = s
+        self.fechadas[s.chave] = s
         while len(self.fechadas) > MAX_FECHADAS:
             self.fechadas.popitem(last=False)
         resumo = s.resumo()
         self.catalogo.salvar(resumo, "fechada", self._descartes(), _agora_iso())
         if not s.so_menu:
             item = {k: resumo[k] for k in ("uid", "inicio", "arquivo", "pista", "tipo", "plataforma", "pacotes", "bytes_disco")}
-            outros = [h for h in self.historico if (h.get("uid"), h.get("inicio")) != (item["uid"], item["inicio"])]
+            outros = [h for h in self.historico if h.get("arquivo") != item["arquivo"] and
+                      (h.get("uid"), h.get("inicio")) != (item["uid"], item["inicio"])]
             self.historico.clear()
             self.historico.extend([item | {"estado": "fechada"}] + outros[:9])
         self._contagem_anterior = collections.Counter()
 
     # --- estado para o painel ---------------------------------------------
     def _publicar(self) -> None:
-        ativa = max(self.sessoes.values(), key=lambda s: s.ultimo_pacote, default=None)
+        agora = time.monotonic()
+        abertas = sorted(self.sessoes.values(), key=lambda s: s.ultimo_pacote, reverse=True)
+        ativas = [s for s in abertas if agora - s.ultimo_pacote < 3 and not s.so_menu]
         if self.pausado_disco:
             estado = "pausado_disco"
-        elif ativa and time.monotonic() - ativa.ultimo_pacote < 3:
+        elif ativas:
             estado = "gravando"
         else:
             estado = "aguardando"
+        principal = ativas[0] if ativas else (abertas[0] if abertas else None)
+
+        def cartao(s: Sessao) -> dict:
+            return s.resumo() | {
+                "tempo_gravado_s": round((dt.datetime.now().astimezone() - s.inicio).total_seconds()),
+                "segundos_sem_sinal": round(agora - s.ultimo_pacote, 1),
+            }
+
         with self._lock:
             self._estado = {
                 "estado": estado,
-                "sessao": ativa.resumo() if ativa else None,
-                "tempo_gravado_s": round((dt.datetime.now().astimezone() - ativa.inicio).total_seconds()) if ativa else 0,
+                "sessao": cartao(principal) if principal else None,
+                "sessoes_ativas": [cartao(s) for s in ativas],
+                "tempo_gravado_s": cartao(principal)["tempo_gravado_s"] if principal else 0,
                 "taxas": self._taxas if estado == "gravando" else {},
-                "fonte": self.fonte,
+                "fontes": {ip: round(agora - visto, 1) for ip, visto in self.fontes.items()},
                 "outras_fontes": dict(self.outras_fontes),
                 "invalidos": self.invalidos,
                 "descartados_disco": self.descartados_disco,

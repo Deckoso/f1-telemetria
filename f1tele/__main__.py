@@ -140,6 +140,22 @@ def cmd_inventario(args) -> int:
     return 0
 
 
+def cmd_analisar(args) -> int:
+    from .analise import SemDados
+    from .decodificador import FormatoNaoSuportado
+    from .relatorio import gerar_arquivo
+
+    try:
+        destino = gerar_arquivo(args.arquivo, args.saida)
+    except (SemDados, FormatoNaoSuportado) as exc:
+        print(f"Não deu para analisar: {exc}")
+        return 1
+    print(f"Análise: {destino}")
+    if not args.sem_navegador:
+        webbrowser.open(Path(destino).resolve().as_uri())
+    return 0
+
+
 def cmd_sintetico(args) -> int:
     pacotes = sintetico.gerar(args.minutos * 60, args.hz, plataforma=args.plataforma, pista=args.pista,
                               tipo_sessao=args.tipo, perder_a_cada=args.perder_a_cada)
@@ -179,6 +195,12 @@ def main(argv=None) -> int:
     i = sub.add_parser("inventario", help="resumo de uma gravação")
     i.add_argument("arquivo")
     i.set_defaults(func=cmd_inventario)
+
+    a = sub.add_parser("analisar", help="gera a análise pós-sessão (HTML) de uma gravação")
+    a.add_argument("arquivo")
+    a.add_argument("--saida", help="pasta do HTML (padrão: analises/ ao lado da gravação)")
+    a.add_argument("--sem-navegador", action="store_true")
+    a.set_defaults(func=cmd_analisar)
 
     s = sub.add_parser("sintetico", help="envia pacotes falsos (formato 2025) para testar o encanamento")
     s.add_argument("--minutos", type=float, default=1.0)

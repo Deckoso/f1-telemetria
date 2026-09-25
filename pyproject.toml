@@ -1,6 +1,6 @@
 [project]
 name = "f1tele"
-version = "0.2.0"
+version = "0.3.0"
 description = "Gravador de telemetria UDP do F1 25 (jogo no Xbox, PlayStation ou PC)"
 requires-python = ">=3.11"
 dependencies = []

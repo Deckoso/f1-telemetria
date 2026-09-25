@@ -42,3 +42,20 @@ def test_host_estranho_bloqueado(painel):
 
 def test_post_sem_cabecalho_proprio_bloqueado(painel):
     assert pedir(painel, "POST", "/abrir-pasta")[0] == 403
+
+
+def test_rota_analise(tmp_path):
+    from . import pista_sintetica as ps
+
+    ps.gravar(str(tmp_path / "2026-09-25_2000_silverstone_treino-1_xbox.f1rec"), [{}, {}])
+    p = Painel(lambda: {}, str(tmp_path), porta=0)
+    p.iniciar()
+    try:
+        status, corpo = pedir(p, "GET", "/analise?arquivo=2026-09-25_2000_silverstone_treino-1_xbox.f1rec")
+        assert status == 200 and b"Voltas" in corpo and b"f1tele-relatorio" in corpo
+        assert (tmp_path / "analises" / "2026-09-25_2000_silverstone_treino-1_xbox.html").exists()
+        for ruim in ("../segredo.f1rec", "..%2Fsegredo.f1rec", "/etc/passwd", "x.txt", ""):
+            assert pedir(p, "GET", "/analise?arquivo=" + ruim)[0] == 400
+        assert pedir(p, "GET", "/analise?arquivo=nao-existe.f1rec")[0] == 404
+    finally:
+        p.parar()
