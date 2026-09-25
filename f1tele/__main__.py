@@ -149,6 +149,11 @@ def cmd_sintetico(args) -> int:
 
 
 def main(argv=None) -> int:
+    for fluxo in (sys.stdout, sys.stderr):
+        try:  # console do Windows redirecionado (cp1252) não pode derrubar o programa por um acento
+            fluxo.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(prog="f1tele", description="Gravador de telemetria do F1 25 (Xbox, PlayStation ou PC).")
     p.add_argument("--versao", action="version", version=f"f1tele {__version__}")
     sub = p.add_subparsers(dest="comando")
