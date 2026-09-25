@@ -3,10 +3,13 @@
 O programa roda **no PC** e grava tudo o que o F1 25 manda, com o jogo **no Xbox ou no próprio PC**. Não precisa escolher nada: ele reconhece sozinho.
 
 ## 1. Instalar (uma vez)
-1. Coloque `F1Telemetria.exe` numa pasta sua (ex.: `Documentos\F1 Telemetria`).
-2. Dê dois cliques. O Windows pode avisar "O Windows protegeu o computador" (o programa não tem assinatura digital ainda): clique em **Mais informações → Executar assim mesmo**.
-3. Na janela do **firewall**, marque **só "Redes privadas"** e clique em Permitir. Nunca marque "Redes públicas".
-4. O navegador abre o painel (`http://127.0.0.1:8750`). Ele mostra o **IP deste computador**: anote.
+1. Baixe o `F1Telemetria-windows.zip` da página de **Releases** do projeto no GitHub (o link fica no README).
+2. Extraia numa pasta sua (ex.: `Documentos\F1 Telemetria`). Os 4 arquivos precisam ficar juntos: `F1Telemetria.exe`, `Gravar com F1 Laps.bat`, `Testar sem o jogo.bat` e este guia.
+3. Dê dois cliques no `F1Telemetria.exe`. O Windows pode avisar "O Windows protegeu o computador" (o programa não tem assinatura digital ainda): clique em **Mais informações → Executar assim mesmo**.
+4. Na janela do **firewall**, marque **só "Redes privadas"** e clique em Permitir. Nunca marque "Redes públicas".
+5. O navegador abre o painel (`http://127.0.0.1:8750`). Ele mostra o **IP deste computador**: anote.
+
+6. **Teste sem o jogo:** com o gravador aberto, dê dois cliques em `Testar sem o jogo.bat`. Em poucos segundos o painel muda para **Gravando** e, 30 s depois, volta a esperar. Deu certo: o programa está funcionando neste PC. Apague o arquivo de teste (pista "desconhecida") da pasta de gravações.
 
 > A rede do PC precisa estar como **Privada** (Configurações → Rede e Internet → sua rede → Perfil de rede: Privada). Se estiver como Pública, o painel avisa.
 
@@ -32,9 +35,8 @@ Se o Xbox não conectar mesmo com o IP certo, ligue o **Modo Broadcast**: ele ma
 ## 4. Usar junto com o F1 Laps
 Só um programa pode receber o jogo diretamente. Deixe o jogo mandando para **este gravador** e ele repassa uma cópia idêntica para o F1 Laps:
 1. No app do F1 Laps, mude a porta UDP para **20778**.
-2. Abra o gravador pelo atalho com repasse: crie um atalho do `.exe` e, em **Destino**, acrescente no final:
-   `gravar --repassar 127.0.0.1:20778`
-3. O painel mostra "Repassando cada pacote para 127.0.0.1:20778".
+2. Em vez do `F1Telemetria.exe`, abra o **`Gravar com F1 Laps.bat`**.
+3. O painel mostra "Repassando cada pacote para 127.0.0.1:20778", e o F1 Laps continua recebendo tudo.
 
 ## 5. Se não aparecer nada
 Depois de 30 segundos sem sinal, o painel mostra um checklist. Os casos mais comuns:

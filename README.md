@@ -4,6 +4,11 @@ Grava a telemetria UDP do **F1 25** com o jogo no **Xbox, PlayStation ou PC**, s
 
 - Guia para o piloto: [`GUIA-DO-PILOTO.md`](GUIA-DO-PILOTO.md)
 
+## Download (Windows)
+Na página de **[Releases](../../releases/latest)**, baixe `F1Telemetria-windows.zip`: executável, atalhos (`Gravar com F1 Laps.bat`, `Testar sem o jogo.bat`) e o [guia do piloto](GUIA-DO-PILOTO.md). Não precisa instalar Python.
+
+O executável não tem assinatura digital: na primeira vez o Windows mostra "O Windows protegeu o computador" (**Mais informações → Executar assim mesmo**). Se preferir, confira o SHA-256 publicado no release ou gere o `.exe` você mesmo pelo workflow deste repositório.
+
 ## Princípios
 1. **Grava bruto, decodifica depois.** O `.f1rec` guarda os bytes exatos do jogo, com horário de chegada. Se a spec mudar (UDP 2026 / Season Pack), a gravação continua valendo.
 2. **Detecta, não configura.** Versão do jogo pelo cabeçalho. Plataforma por `Participants.m_platform` do carro do jogador, com a origem do pacote como reserva (este computador = PC; outro IP = console).
@@ -43,7 +48,7 @@ python3.12 -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/python -m pytest -q              # suíte (CP-0, CP-2 e demais)
 .venv/bin/python tests/cp1_uma_hora.py     # CP-1: 1 h a 60 Hz acelerada + kill -9 (macOS/Linux)
 ```
-O `.exe` do Windows sai do GitHub Actions (`.github/workflows/build.yml`, PyInstaller) como artefato do build.
+O `.exe` do Windows sai do GitHub Actions (`.github/workflows/build.yml`, PyInstaller). Uma tag `v*` publica o release com o zip e o SHA-256.
 
 ## Spec
 `docs/spec/README.md`. O PDF oficial da EA não é versionado; o link está lá.
