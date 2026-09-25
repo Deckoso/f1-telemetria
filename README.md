@@ -1,0 +1,49 @@
+# f1tele: gravador de telemetria do F1 25
+
+Grava a telemetria UDP do **F1 25** com o jogo no **Xbox, PlayStation ou PC**, sessão por sessão, sem perder pacote. Base das próximas ondas (análise pós-corrida, gerador de setup, tempo real).
+
+- Guia para o piloto: [`GUIA-DO-PILOTO.md`](GUIA-DO-PILOTO.md)
+
+## Princípios
+1. **Grava bruto, decodifica depois.** O `.f1rec` guarda os bytes exatos do jogo, com horário de chegada. Se a spec mudar (UDP 2026 / Season Pack), a gravação continua valendo.
+2. **Detecta, não configura.** Versão do jogo pelo cabeçalho. Plataforma por `Participants.m_platform` do carro do jogador, com a origem do pacote como reserva (este computador = PC; outro IP = console).
+3. **Não rouba o F1 Laps**: `--repassar host:porta` reenvia cópia idêntica.
+4. **Memória limitada**: fila com teto (20 000) entre o receptor e o disco; descarte é contado, nunca acumula.
+5. **Rede mínima**: só recebe UDP na porta do jogo; o painel ouve **apenas 127.0.0.1** (com checagem de Host); nada vai para a internet.
+
+## Uso
+```bash
+python -m f1tele gravar [--porta 20777] [--pasta DIR] [--repassar 127.0.0.1:20778] [--sem-navegador]
+python -m f1tele reproduzir ARQ.f1rec [--velocidade 1|2|10|0] [--desde MIN] [--loop] [--porta 20777]
+python -m f1tele inventario ARQ.f1rec          # contagem por tipo, Hz, perdas, formato, plataforma
+python -m f1tele sintetico --minutos 1         # pacotes falsos (formato 2025) para testar o encanamento
+```
+Sem argumentos (duplo clique no `.exe`) = `gravar`.
+
+## Formato `.f1rec`
+Stream gzip: `F1REC\0` · u16 versão · u32 tamanho · JSON de metadados · registros `u32 tamanho | u64 t_recv_ns | u8 origem | bytes`. Flush de sincronização a cada 1 s ou 2 MB: arquivo cortado é legível até o último flush. Catálogo em `sessoes.sqlite` na mesma pasta.
+
+Nome: `AAAA-MM-DD_HHMM_<pista>_<sessao>.f1rec`. Durante a gravação, `...<uid>.f1rec.parcial`; se o programa cair, vira `_interrompida.f1rec` na próxima execução.
+
+## Estrutura
+| Arquivo | Papel |
+|---|---|
+| `f1tele/spec.py` | cabeçalho, ids, tamanhos 2025, pistas, sessões, plataformas |
+| `f1tele/cabecalho.py` | leitura do cabeçalho + Session (pista/tipo) + Participants (plataforma) |
+| `f1tele/receptor.py` | socket UDP → repasse → fila com teto |
+| `f1tele/gravador.py` | sessões por `m_sessionUID`, detecção, arquivo, catálogo, disco |
+| `f1tele/formato.py` | escrita/leitura `.f1rec` |
+| `f1tele/reprodutor.py` | reproduzir + inventário |
+| `f1tele/sintetico.py` | gerador de pacotes (só encanamento) |
+| `f1tele/painel.py` | painel `127.0.0.1:8750` |
+
+## Desenvolvimento
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install pytest
+.venv/bin/python -m pytest -q              # suíte (CP-0, CP-2 e demais)
+.venv/bin/python tests/cp1_uma_hora.py     # CP-1: 1 h a 60 Hz acelerada + kill -9 (macOS/Linux)
+```
+O `.exe` do Windows sai do GitHub Actions (`.github/workflows/build.yml`, PyInstaller) como artefato do build.
+
+## Spec
+`docs/spec/README.md`. O PDF oficial da EA não é versionado; o link está lá.
